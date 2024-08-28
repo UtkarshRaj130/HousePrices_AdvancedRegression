@@ -1,0 +1,116 @@
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error
+from sklearn.ensemble import StackingRegressor
+from sklearn.linear_model import Ridge
+from xgboost import XGBRegressor
+import lightgbm as lgb
+from catboost import CatBoostRegressor
+
+# Step 1: Import train.csv and test.csv
+train = pd.read_csv('train.csv')
+test = pd.read_csv('test.csv')
+
+# Store the original test ID for reference later
+test_ids = test.index
+
+# Step 2: Concatenate the train and test datasets
+# Create a new column 'Source' to distinguish between train and test data
+train['Source'] = 1
+test['Source'] = 0
+
+# Concatenate train and test data
+combined = pd.concat([train, test], axis=0, ignore_index=True)
+
+# Step 3: Check for Null Values and analyze it in combined data
+null_values = combined.isnull().sum()
+print("Null Values in each column:\n", null_values[null_values > 0])
+print("\nTotal Null Values: ", null_values.sum())
+
+# Separate numeric and categorical columns
+numeric_cols = combined.select_dtypes(include=['number']).columns
+categorical_cols = combined.select_dtypes(include=['object']).columns
+
+# Fill missing values for numeric columns with the median
+combined[numeric_cols] = combined[numeric_cols].fillna(combined[numeric_cols].median())
+
+# Fill missing values for categorical columns with the mode (most frequent value)
+for col in categorical_cols:
+    mode_val = combined[col].mode()[0]  # Get the most frequent value
+    combined[col].fillna(mode_val, inplace=True)
+
+# Drop features with more than 500 null values
+null_values = combined.isnull().sum()
+features_to_drop = null_values[null_values > 500].index
+print(f"\nDropping features with more than 500 null values: {features_to_drop.tolist()}")
+combined.drop(columns=features_to_drop, inplace=True)
+
+# Update categorical columns after dropping features
+categorical_cols = combined.select_dtypes(include=['object']).columns 
+
+# Step 4: One-hot encoding for each string-based feature
+# Apply one-hot encoding to categorical variables
+combined = pd.get_dummies(combined, columns=categorical_cols, drop_first=True)
+
+print("Data after one-hot encoding:\n", combined.head())
+
+# Step 5: Split combined data back into train and test sets
+train_data = combined[combined['Source'] == 1].drop('Source', axis=1)
+test_data = combined[combined['Source'] == 0].drop('Source', axis=1)
+
+# Ensure the columns match exactly between train and test data
+X_train = train_data.drop(columns=['SalePrice'])
+y_train = train_data['SalePrice']
+
+# Match columns in test set with the training set
+X_test = test_data[X_train.columns]
+
+# Step 6: Define base models and stacking model
+estimators = [
+    ('xgb', XGBRegressor(n_estimators=1000, learning_rate=0.05, max_depth=10, random_state=42)),
+    ('lgbm', lgb.LGBMRegressor(n_estimators=1000, learning_rate=0.05, num_leaves=31, random_state=42)),
+    ('catboost', CatBoostRegressor(iterations=1000, learning_rate=0.1, depth=10, random_seed=42, verbose=0))
+]
+
+# Initialize the stacking model with Ridge as the final estimator
+stacking_model = StackingRegressor(estimators=estimators, final_estimator=Ridge())
+
+# Step 7: Train the stacking model on the entire training data
+stacking_model.fit(X_train, y_train)
+
+# Evaluate on training data
+train_predictions = stacking_model.predict(X_train)
+train_mse = mean_squared_error(y_train, train_predictions)
+print(f'Training MSE: {train_mse}')
+
+# Split the training data into training and validation sets to check for overfitting
+X_train_full, X_val, y_train_full, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
+
+# Train the stacking model on the full training set
+stacking_model.fit(X_train_full, y_train_full)
+
+# Evaluate on validation data
+val_predictions = stacking_model.predict(X_val)
+val_mse = mean_squared_error(y_val, val_predictions)
+print(f'Validation MSE: {val_mse}')
+
+# Compare the training and validation MSE
+if train_mse < val_mse:
+    print('The model may be overfitting.')
+else:
+    print('The model seems to be generalizing well.')
+
+# Step 8: Predict on the test set
+y_test_pred = stacking_model.predict(X_test)
+
+# Handle any extremely large or small predictions
+y_test_pred = np.clip(y_test_pred, 0, np.percentile(y_test_pred, 99))
+
+# Step 9: Save the predictions to a CSV file
+output = pd.DataFrame({'Id': test_ids, 'SalePrice': y_test_pred})
+output.to_csv('test_predictions.csv', index=False)
+
+print("\nPredictions saved to test_predictions.csv")
