@@ -1,6 +1,6 @@
 # House Prices: Advanced Regression Techniques - Kaggle Competition
 
-This repository contains the solution to the Kaggle competition "House Prices: Advanced Regression Techniques." The goal of this competition is to predict the final sale price of homes based on various features.
+[This repository](https://github.com/UtkarshRaj130/HousePrices_AdvancedRegression) contains the solution to the Kaggle competition "House Prices: Advanced Regression Techniques." The goal of this competition is to predict the final sale price of homes based on various features.
 
 ## Solution Overview
 
